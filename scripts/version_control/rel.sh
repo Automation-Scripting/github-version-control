@@ -5,6 +5,7 @@ rel() {
   shift || true
 
   case "$cmd" in
+    wipe) rel_wipe "$@" ;;
     init) rel_init "$@" ;;
     p)    rel_patch "$@" ;;
     m)    rel_minor "$@" ;;
