@@ -45,25 +45,18 @@ rel() {
   # Última tag (semver)
   # ----------------------------
   local last major minor patch
-  # pega última release/tag do GitHub (fonte da verdade)
+  # Última versão = maior tag vX.Y.Z no GitHub
   last="$(
-    gh release list --repo "$owner/$repo" --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || true
+    gh api repos/$owner/$repo/tags --paginate -q '.[].name' |
+      grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
+      sort -V |
+      tail -n 1
   )"
 
-  # fallback: tenta última tag do git local (caso não existam releases ainda)
-  if [ -z "${last:-}" ] || [ "$last" = "null" ]; then
-    git fetch --tags >/dev/null 2>&1 || true
-    last="$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")"
-  fi
+  [ -z "${last:-}" ] && last="v0.0.0"
 
-  # garante prefixo v
-  case "$last" in
-    v*) ;;
-    *) last="v$last" ;;
-  esac
   last="${last#v}"
   IFS='.' read -r major minor patch <<< "$last"
-
   # ----------------------------
   # Helpers
   # ----------------------------

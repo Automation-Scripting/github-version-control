@@ -31,4 +31,6 @@ todo2() {
 
   # lista itens
     gh project item-list "$proj" --owner "$owner" --format json 
+
+    echo "haha"
 }
