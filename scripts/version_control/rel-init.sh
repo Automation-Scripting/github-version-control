@@ -108,7 +108,7 @@ rel_init() {
   if [[ -n "${open_proj:-}" ]]; then
     target_proj="$open_proj"
     target_title="$open_title"
-    echo "📌 Project aberto encontrado: $target_title (#$target_proj)"
+    echo "Project aberto encontrado: $target_title (#$target_proj)"
   else
     if [[ -n "${last_title:-}" ]]; then
       # cria próximo PATCH
@@ -120,7 +120,7 @@ rel_init() {
       target_title="v0.0.1"
     fi
 
-    echo "🆕 Criando Project (milestone): $target_title"
+    echo "Criando Project (milestone): $target_title"
 
     target_proj="$(
       gh project create --owner "$owner" --title "$target_title" --format json |
@@ -129,8 +129,8 @@ rel_init() {
 
     # linka ao repo (pra aparecer na aba Projects do repo)
     gh project link "$target_proj" --owner "$owner" --repo "$repo_full" >/dev/null
-    echo "🔗 Project associado ao repositório: $repo_full"
-    echo "✅ Project criado: $target_title (#$target_proj)"
+    echo "Project associado ao repositório: $repo_full"
+    echo "Project criado: $target_title (#$target_proj)"
   fi
 
   # ----------------------------
@@ -139,7 +139,7 @@ rel_init() {
   # Aqui rel_init recebe os tokens dos itens diretamente (não recebe "init")
   # ----------------------------
   if [[ "$#" -ge 1 ]]; then
-    echo "📝 Criando itens (separador: --):"
+    echo "Criando itens (separador: --):"
 
     local sep="--"
     local parts=()
@@ -170,7 +170,7 @@ rel_init() {
       )"
 
       if [[ -z "${issue_url:-}" || "${issue_url:-}" != https://github.com/*/issues/* ]]; then
-        echo "  ❌ falhou ao criar issue: $t"
+        echo "  falhou ao criar issue: $t"
         echo "     saída: ${issue_url:-<vazio>}"
         continue
       fi
@@ -179,6 +179,6 @@ rel_init() {
       echo "  • criado: $t"
     done
   else
-    echo "ℹ️ (sem itens) você pode criar depois."
+    echo "(sem itens) você pode criar depois."
   fi
 }
