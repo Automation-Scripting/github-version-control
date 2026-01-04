@@ -45,7 +45,22 @@ rel() {
   # Última tag (semver)
   # ----------------------------
   local last major minor patch
-  last="$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")"
+  # pega última release/tag do GitHub (fonte da verdade)
+  last="$(
+    gh release list --repo "$owner/$repo" --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || true
+  )"
+
+  # fallback: tenta última tag do git local (caso não existam releases ainda)
+  if [ -z "${last:-}" ] || [ "$last" = "null" ]; then
+    git fetch --tags >/dev/null 2>&1 || true
+    last="$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")"
+  fi
+
+  # garante prefixo v
+  case "$last" in
+    v*) ;;
+    *) last="v$last" ;;
+  esac
   last="${last#v}"
   IFS='.' read -r major minor patch <<< "$last"
 
@@ -117,7 +132,7 @@ rel() {
             [ -z "$t" ] && continue
 
             local issue_url
-            issue_url="$(gh issue create --repo "$owner/$repo" --title "$t" --body "Planned for $next_title" --assignee @me  --json url -q .url)"
+            issue_url="$(gh issue create --repo "$owner/$repo" --title "$t" --body "Planned for $next_title" --json url -q .url)"
             gh project item-add "$next_proj" --owner "$owner" --url "$issue_url" >/dev/null
             echo "  • criado: $t"
           done
@@ -194,4 +209,3 @@ rel() {
   echo "❌ Modo inválido: use p, m ou M"
   return 1
 }
-
