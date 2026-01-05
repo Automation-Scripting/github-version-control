@@ -28,11 +28,10 @@ rel_patch() {
   if [[ -z "${item_id:-}" || "$item_id" == "null" ]]; then
     echo "[warn] Project item not found for issue #$issue_no (nothing to mark Done)."
   else
-    echo "[info] Marking project item as Done (issue #$issue_no, item_id=$item_id)..."
     if rel_try_set_status "$REL_PROJ" "$item_id" "Done"; then
-      echo "[ok] Marked Done."
+      echo "[info] project item #$issue_no marked as Done."
     else
-      echo "[warn] Could not mark Done (best-effort)."
+      echo "[warn] Could not mark item #$issue_no as Done (best-effort)."
     fi
   fi
 

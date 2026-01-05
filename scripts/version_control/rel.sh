@@ -32,6 +32,9 @@ rel() {
     #   esac
     #   return 0
     #   ;;
+    ready)     shift; rel_ready "$@" ;;
+    progress)  shift; rel_progress "$@" ;;
+    done)      shift; rel_done "$@" ;;
     init) rel_init "$@" ;;
     p)    rel_patch "$@" ;;
     m)    rel_minor "$@" ;;

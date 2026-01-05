@@ -141,9 +141,8 @@ rel_create_release() {
   local tag="$1"
   local notes="$2"
 
-  echo "[debug] repo: $REL_REPO_FULL"
-  echo "[debug] last tag: $REL_LAST_TAG"
-  echo "[debug] confirm tag to create: $tag"
+  echo "[info] $REL_REPO_FULL"
+  echo "[info] Tag to create: $REL_LAST_TAG -> $tag"
 
   gh release create "$tag" --title "$tag" --notes "$notes"
   echo "Release created: $tag"
