@@ -1,31 +1,73 @@
 todo() {
-  set -uo pipefail
+  emulate -L zsh
+  set -euo pipefail
 
-  local owner
+  local owner repo repo_full owner_type
   owner="$(gh repo view --json owner -q .owner.login)"
+  repo="$(gh repo view --json name -q .name)"
+  repo_full="$owner/$repo"
 
-  # milestone atual: primeiro project ABERTO cujo título parece vX.Y.Z
-  local proj
+  owner_type="$(gh api "repos/$repo_full" -q '.owner.type')"  # User | Organization
+
+  local projects_json
+  if [[ "$owner_type" == "Organization" ]]; then
+    projects_json="$(
+      gh api graphql -f query='
+        query($login:String!) {
+          organization(login:$login) {
+            projectsV2(first: 100) {
+              nodes {
+                number
+                title
+                closed
+                repositories(first: 100) { nodes { nameWithOwner } }
+              }
+            }
+          }
+        }' -F login="$owner" \
+      | jq -c '.data.organization.projectsV2.nodes'
+    )"
+  else
+    projects_json="$(
+      gh api graphql -f query='
+        query($login:String!) {
+          user(login:$login) {
+            projectsV2(first: 100) {
+              nodes {
+                number
+                title
+                closed
+                repositories(first: 100) { nodes { nameWithOwner } }
+              }
+            }
+          }
+        }' -F login="$owner" \
+      | jq -c '.data.user.projectsV2.nodes'
+    )"
+  fi
+
+  # only open dev lines vX.Y.x linked to this repo
+  local proj title
   proj="$(
-    gh project list --owner "$owner" --format json |
-      jq -r '
-        .projects
-        | map(select(.closed == false))
-        | map(select(.title | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))
-        | sort_by(.number)
-        | .[0].number // empty
-      '
+    echo "$projects_json" | jq -r --arg REPO "$repo_full" '
+      map(
+        select(.closed == false)
+        | select((.title // "") | test("^v[0-9]+\\.[0-9]+\\.x$"))
+        | select((.repositories.nodes // []) | map(.nameWithOwner) | index($REPO))
+      )
+      | sort_by(.number)
+      | .[0].number // empty
+    '
   )"
 
-  if [ -z "${proj:-}" ]; then
-    echo "Nenhum Project aberto com título tipo vX.Y.Z encontrado para $owner."
+  if [[ -z "${proj:-}" ]]; then
+    echo "No open dev line project (vX.Y.x) found for $repo_full."
     return 0
   fi
 
-  local title
   title="$(gh project view "$proj" --owner "$owner" --format json | jq -r '.title')"
 
-  echo "Milestone (Project) aberto: $title (#$proj)"
+  echo "Open dev line (Project): $title (#$proj)"
   echo "   Patch: rel p #<issue>   | Minor: rel m   | Major: rel M"
   echo
 
@@ -42,7 +84,7 @@ todo() {
 
       .items
       | if (length==0) then
-          "   (sem itens)"
+          "   (no items)"
         else
           .[]
           | ("- [" + istatus(.) + "] " + inum(.) + "  " + ititle(.))

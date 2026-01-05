@@ -2,11 +2,6 @@ rel_init() {
   emulate -L zsh
   set -euo pipefail
 
-  # Seu dispatcher provavelmente chama: rel init ...
-  # Aqui assumimos que rel_init recebe todos os args APÓS "init".
-  # Ex: rel init Item 01 -- Item 02
-  # => rel_init "Item" "01" "--" "Item" "02"
-
   # ----------------------------
   # Owner / repo
   # ----------------------------
@@ -16,14 +11,15 @@ rel_init() {
   repo_full="$owner/$repo"
 
   # ----------------------------
-  # GraphQL: lista projectsV2 do USER e filtra por repo linkado
-  # (se você for org, a gente cai pro bloco org)
+  # Detect owner type (User vs Organization)
   # ----------------------------
   local owner_type
-  owner_type="$(gh api "repos/$repo_full" -q '.owner.type')"  # "User" ou "Organization"
+  owner_type="$(gh api "repos/$repo_full" -q '.owner.type')"  # "User" | "Organization"
 
+  # ----------------------------
+  # GraphQL: list projectsV2 + linked repositories
+  # ----------------------------
   local projects_json
-
   if [[ "$owner_type" == "Organization" ]]; then
     projects_json="$(
       gh api graphql -f query='
@@ -61,24 +57,20 @@ rel_init() {
   fi
 
   # ----------------------------
-  # Filtra: só milestones vX.Y.Z linkados ao repo atual
+  # Filter: only dev lines vX.Y.x linked to THIS repo
   # ----------------------------
   local repo_projects
   repo_projects="$(
     echo "$projects_json" | jq -c --arg REPO "$repo_full" '
       map(
-        select(
-          (.title // "") | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")
-        )
-        | select(
-          (.repositories.nodes // []) | map(.nameWithOwner) | index($REPO)
-        )
+        select((.title // "") | test("^v[0-9]+\\.[0-9]+\\.x$"))
+        | select((.repositories.nodes // []) | map(.nameWithOwner) | index($REPO))
       )
     '
   )"
 
   # ----------------------------
-  # Decide target_proj/target_title
+  # Pick open dev line first (vX.Y.x)
   # ----------------------------
   local open_proj open_title
   open_proj="$(
@@ -88,6 +80,7 @@ rel_init() {
       | .[0].number // empty
     '
   )"
+
   open_title="$(
     echo "$repo_projects" | jq -r --argjson N "${open_proj:-0}" '
       map(select(.number == $N))
@@ -95,51 +88,62 @@ rel_init() {
     ' 2>/dev/null || true
   )"
 
+  # ----------------------------
+  # Find last dev line title (max vX.Y.x), even if closed
+  # ----------------------------
   local last_title
   last_title="$(
     echo "$repo_projects" | jq -r '
       map(.title)
-      | sort_by(sub("^v";"") | split(".") | map(tonumber))
+      | sort_by(
+          sub("^v";"")
+          | sub("\\.x$";"")
+          | split(".")
+          | map(tonumber)
+        )
       | last // empty
     '
   )"
 
+  # ----------------------------
+  # Decide target project
+  # ----------------------------
   local target_proj="" target_title=""
   if [[ -n "${open_proj:-}" ]]; then
     target_proj="$open_proj"
     target_title="$open_title"
-    echo "Project aberto encontrado: $target_title (#$target_proj)"
+    echo "📌 Open dev line found: $target_title (#$target_proj)"
   else
     if [[ -n "${last_title:-}" ]]; then
-      # cria próximo PATCH
-      local base major_i minor_i patch_i
+      # last_title is like vX.Y.x -> next is vX.(Y+1).x
+      local base major_i minor_i
       base="${last_title#v}"
-      IFS='.' read -r major_i minor_i patch_i <<< "$base"
-      target_title="v${major_i}.${minor_i}.$((patch_i + 1))"
+      base="${base%.x}"
+      IFS='.' read -r major_i minor_i <<< "$base"
+      target_title="v${major_i}.$((minor_i + 1)).x"
     else
-      target_title="v0.0.1"
+      target_title="v0.0.x"
     fi
 
-    echo "Criando Project (milestone): $target_title"
+    echo "Creating dev line project: $target_title"
 
     target_proj="$(
       gh project create --owner "$owner" --title "$target_title" --format json |
         jq -r '.number'
     )"
 
-    # linka ao repo (pra aparecer na aba Projects do repo)
     gh project link "$target_proj" --owner "$owner" --repo "$repo_full" >/dev/null
-    echo "Project associado ao repositório: $repo_full"
-    echo "Project criado: $target_title (#$target_proj)"
+    echo "Project linked to repo: $repo_full"
+    echo "Project created: $target_title (#$target_proj)"
   fi
 
   # ----------------------------
-  # Criar itens (separador: --, sem aspas)
-  # Uso: rel init Item 01 -- Item 02 -- Item 03
-  # Aqui rel_init recebe os tokens dos itens diretamente (não recebe "init")
+  # Create items (separator: --, no quoting)
+  # Usage: rel init Item 01 -- Item 02 -- Item 03
+  # rel_init receives tokens AFTER "init"
   # ----------------------------
   if [[ "$#" -ge 1 ]]; then
-    echo "Criando itens:"
+    echo "Creating items:"
 
     local sep="--"
     local parts=()
@@ -170,16 +174,15 @@ rel_init() {
       )"
 
       if [[ -z "${issue_url:-}" || "${issue_url:-}" != https://github.com/*/issues/* ]]; then
-        echo "  falhou ao criar issue: $t"
-        echo "     saída: ${issue_url:-<vazio>}"
+        echo "  failed to create issue: $t"
+        echo "     output: ${issue_url:-<empty>}"
         continue
       fi
 
       gh project item-add "$target_proj" --owner "$owner" --url "$issue_url" >/dev/null
-
-      echo "  • criado: $t"
+      echo "  • created: $t"
     done
   else
-    echo "(sem itens) você pode criar depois."
+    echo "(no items) you can create them later."
   fi
 }

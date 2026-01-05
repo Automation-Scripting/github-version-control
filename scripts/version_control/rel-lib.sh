@@ -1,5 +1,5 @@
 # rel-lib.zsh
-# helpers compartilhados por rel_patch/rel_minor/rel_major
+# Shared helpers for rel_patch / rel_minor / rel_major
 
 rel_ctx_load_repo() {
   emulate -L zsh
@@ -29,11 +29,14 @@ rel_ctx_load_open_milestone() {
   )"
 
   if [[ -z "${REL_PROJ:-}" ]]; then
-    echo "Nenhum Project (milestone line) aberto com título vX.Y.x encontrado para $REL_OWNER."
+    echo "No open Project (development line) with title vX.Y.x found for $REL_OWNER."
     return 1
   fi
 
-  REL_PROJ_TITLE="$(gh project view "$REL_PROJ" --owner "$REL_OWNER" --format json | jq -r '.title')"
+  REL_PROJ_TITLE="$(
+    gh project view "$REL_PROJ" --owner "$REL_OWNER" --format json |
+      jq -r '.title'
+  )"
 }
 
 rel_ctx_load_last_tag() {
@@ -48,27 +51,20 @@ rel_ctx_load_last_tag() {
       sort -V |
       tail -n 1 || true
   )"
+
   [[ -z "${REL_LAST_TAG:-}" ]] && REL_LAST_TAG="v0.0.0"
 
   local base="${REL_LAST_TAG#v}"
   IFS='.' read -r REL_MAJOR REL_MINOR REL_PATCH <<< "$base"
 }
 
-# ---------- project helpers ----------
+# ---------- Project helpers ----------
+
 rel_items_json() {
   emulate -L zsh
   set -euo pipefail
   gh project item-list "$REL_PROJ" --owner "$REL_OWNER" --format json
 }
-
-# rel_try_set_status() {
-#   emulate -L zsh
-#   set -euo pipefail
-#   local project_number="$1" item_id="$2" new_status="$3"
-
-#   # best-effort
-#   gh project item-edit "$project_number" --owner "$REL_OWNER" --id "$item_id" --status "$new_status" >/dev/null 2>&1 || true
-# }
 
 rel_try_set_status() {
   emulate -L zsh
@@ -76,21 +72,36 @@ rel_try_set_status() {
 
   local project_number="$1"
   local item_id="$2"
-  local new_status="$3"   # não use nome "status"
+  local new_status="$3"   # Avoid using the name "status"
 
   local project_id fields_json status_field_id option_id
 
-  project_id="$(gh project view "$project_number" --owner "$REL_OWNER" --format json | jq -r '.id')"
+  project_id="$(
+    gh project view "$project_number" --owner "$REL_OWNER" --format json |
+      jq -r '.id'
+  )"
 
-  fields_json="$(gh project field-list "$project_number" --owner "$REL_OWNER" --format json)"
+  fields_json="$(
+    gh project field-list "$project_number" --owner "$REL_OWNER" --format json
+  )"
 
-  status_field_id="$(echo "$fields_json" | jq -r '.fields[] | select(.name=="Status") | .id' | head -n1)"
+  status_field_id="$(
+    echo "$fields_json" |
+      jq -r '.fields[] | select(.name=="Status") | .id' |
+      head -n1
+  )"
+
   [[ -z "${status_field_id:-}" || "$status_field_id" == "null" ]] && return 0
 
-  option_id="$(echo "$fields_json" | jq -r --arg S "$new_status" '
-    .fields[] | select(.id=="'"$status_field_id"'")
-    | .options[] | select(.name==$S) | .id
-  ' | head -n1)"
+  option_id="$(
+    echo "$fields_json" |
+      jq -r --arg S "$new_status" '
+        .fields[] | select(.id=="'"$status_field_id"'")
+        | .options[] | select(.name==$S) | .id
+      ' |
+      head -n1
+  )"
+
   [[ -z "${option_id:-}" || "$option_id" == "null" ]] && return 0
 
   gh project item-edit \
@@ -104,9 +115,12 @@ rel_try_set_status() {
 rel_mark_all_done() {
   emulate -L zsh
   set -euo pipefail
+
   local project_number="$1"
   local json
+
   json="$(gh project item-list "$project_number" --owner "$REL_OWNER" --format json)"
+
   echo "$json" | jq -r '.items[].id' | while IFS= read -r item_id; do
     [[ -z "$item_id" ]] && continue
     rel_try_set_status "$project_number" "$item_id" "Done"
@@ -116,36 +130,43 @@ rel_mark_all_done() {
 rel_issue_comment() {
   emulate -L zsh
   set -euo pipefail
-  local issue_no="$1" body="$2"
+
+  local issue_no="$1"
+  local body="$2"
+
   gh issue comment "$issue_no" --repo "$REL_REPO_FULL" --body "$body" >/dev/null
 }
 
 rel_create_release() {
   emulate -L zsh
   set -euo pipefail
-  local tag="$1" notes="$2"
+
+  local tag="$1"
+  local notes="$2"
 
   echo "[debug] repo: $REL_REPO_FULL"
   echo "[debug] last tag: $REL_LAST_TAG"
   echo "[debug] confirm tag to create: $tag"
 
   gh release create "$tag" --title "$tag" --notes "$notes"
-  echo "Release criada: $tag"
+  echo "Release created: $tag"
 }
 
 rel_close_project() {
   emulate -L zsh
   set -euo pipefail
+
   gh project close "$REL_PROJ" --owner "$REL_OWNER"
-  echo "🔒 Project fechado: ${REL_PROJ_TITLE} (#$REL_PROJ)"
+  echo "Project closed: ${REL_PROJ_TITLE} (#$REL_PROJ)"
 }
 
 rel_maybe_open_next_project() {
   emulate -L zsh
   set -euo pipefail
+
   local next_title="$1"
 
-  echo -n "Abrir próximo Project (${next_title})? [y/N]: "
+  echo -n "Open next Project (${next_title})? [y/N]: "
   local ans
   IFS= read -r ans || true
 
@@ -156,10 +177,10 @@ rel_maybe_open_next_project() {
         gh project create --owner "$REL_OWNER" --title "$next_title" --format json |
           jq -r '.number'
       )"
-      echo "Novo Project aberto: $next_title (#$next_proj)"
+      echo "New Project opened: $next_title (#$next_proj)"
       ;;
     *)
-      echo "Ok. Nenhum novo Project criado."
+      echo "Ok. No new Project created."
       ;;
   esac
 }
