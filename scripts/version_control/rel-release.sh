@@ -16,7 +16,8 @@ rel_patch() {
   [[ "$issue_no" =~ ^[0-9]+$ ]] || { echo "Número inválido: $ref"; return 1; }
 
   local tag="v${REL_MAJOR}.${REL_MINOR}.$((REL_PATCH + 1))"
-  local notes="See item #${issue_no} of project ${REL_PROJ_TITLE} for details."
+  local next_minor="$((REL_MINOR + 1))"
+  local notes="See item #${issue_no} of project v${REL_MAJOR}.${next_minor} for details."
   rel_create_release "$tag" "$notes"
 
   # marcar o item do project como Done (best-effort)
@@ -43,13 +44,16 @@ rel_minor() {
   rel_ctx_load_last_tag
 
   # release minor
-  local tag_release="v${REL_MAJOR}.$((REL_MINOR + 1)).0"
-  local notes="See project ${tag_release} for details."
+  local next_minor="$((REL_MINOR + 1))"
+  local tag_release="v${REL_MAJOR}.${next_minor}.0"
+  local proj_released="v${REL_MAJOR}.${next_minor} (liberado)"
+  local notes="See project v${REL_MAJOR}.${next_minor} for details."
 
   # (novo) renomeia o project atual pra bater com a tag
   # (usa a variável do project carregado no ctx; aqui assumo REL_PROJ é o number)
-  gh project edit "$REL_PROJ" --owner "$REL_OWNER" --title "$tag_release" >/dev/null
-  REL_PROJ_TITLE="$tag_release"
+  gh project edit "$REL_PROJ" --owner "$REL_OWNER" --title "$proj_released" >/dev/null
+  REL_PROJ_TITLE="$proj_released"
+
 
   rel_create_release "$tag_release" "$notes"
 
@@ -57,7 +61,7 @@ rel_minor() {
   rel_close_project
 
   # (novo) próximo project = patch+1 do milestone recém lançado
-  local next_project="v${REL_MAJOR}.$((REL_MINOR + 1)).1"
+  local next_project="v${REL_MAJOR}.${next_minor}.x"
   rel_maybe_open_next_project "$next_project"
 }
 
@@ -70,12 +74,14 @@ rel_major() {
   rel_ctx_load_last_tag
 
   # release major
-  local tag_release="v$((REL_MAJOR + 1)).0.0"
-  local notes="See project ${tag_release} for details."
+  local next_major="$((REL_MAJOR + 1))"
+  local tag_release="v${next_major}.0.0"
+  local proj_released="v${next_major}.0 (liberado)"
+  local notes="See project v${next_major}.0 for details."
 
   # (novo) renomeia o project atual pra bater com a tag
-  gh project edit "$REL_PROJ" --owner "$REL_OWNER" --title "$tag_release" >/dev/null
-  REL_PROJ_TITLE="$tag_release"
+  gh project edit "$REL_PROJ" --owner "$REL_OWNER" --title "$proj_released" >/dev/null
+  REL_PROJ_TITLE="$proj_released"
 
   rel_create_release "$tag_release" "$notes"
 
@@ -83,6 +89,6 @@ rel_major() {
   rel_close_project
 
   # (novo) próximo project = patch+1 do major recém lançado
-  local next_project="v$((REL_MAJOR + 1)).0.1"
+  local next_project="v${next_major}.0.x"
   rel_maybe_open_next_project "$next_project"
 }

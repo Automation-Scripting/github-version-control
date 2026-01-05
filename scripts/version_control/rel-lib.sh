@@ -22,14 +22,14 @@ rel_ctx_load_open_milestone() {
       jq -r '
         .projects
         | map(select(.closed == false))
-        | map(select(.title | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))
+        | map(select(.title | test("^v[0-9]+\\.[0-9]+\\.x$")))
         | sort_by(.number)
         | .[0].number // empty
       '
   )"
 
   if [[ -z "${REL_PROJ:-}" ]]; then
-    echo "Nenhum Project (milestone) aberto com título vX.Y.Z encontrado para $REL_OWNER."
+    echo "Nenhum Project (milestone line) aberto com título vX.Y.x encontrado para $REL_OWNER."
     return 1
   fi
 
