@@ -3,21 +3,19 @@ rel_init() {
   set -euo pipefail
 
   # ----------------------------
-  # Owner / repo
+  # Repo context
   # ----------------------------
   local owner repo repo_full
   owner="$(gh repo view --json owner -q .owner.login)"
   repo="$(gh repo view --json name -q .name)"
   repo_full="$owner/$repo"
 
-  # ----------------------------
-  # Detect owner type (User vs Organization)
-  # ----------------------------
+  # Detect owner type (User | Organization)
   local owner_type
   owner_type="$(gh api "repos/$repo_full" -q '.owner.type')"  # "User" | "Organization"
 
   # ----------------------------
-  # GraphQL: list projectsV2 + linked repositories
+  # GraphQL: list Projects v2 + linked repositories (scoped to this owner)
   # ----------------------------
   local projects_json
   if [[ "$owner_type" == "Organization" ]]; then
@@ -56,143 +54,141 @@ rel_init() {
     )"
   fi
 
-  # ----------------------------
-  # Filter: only dev lines vX.Y.x linked to THIS repo
-  # ----------------------------
-  local repo_projects
-  repo_projects="$(
+  # Keep only projects linked to THIS repo (critical!)
+  local linked
+  linked="$(
     echo "$projects_json" | jq -c --arg REPO "$repo_full" '
       map(
-        select((.title // "") | test("^v[0-9]+\\.[0-9]+\\.x$"))
-        | select((.repositories.nodes // []) | map(.nameWithOwner) | index($REPO))
+        select((.repositories.nodes // []) | map(.nameWithOwner) | index($REPO))
       )
     '
   )"
 
   # ----------------------------
-  # Pick open dev line first (vX.Y.x)
+  # 1) Reuse an open dev line project: vX.Y.x
   # ----------------------------
   local open_proj open_title
   open_proj="$(
-    echo "$repo_projects" | jq -r '
+    echo "$linked" | jq -r '
       map(select(.closed == false))
+      | map(select((.title // "") | test("^v[0-9]+\\.[0-9]+\\.x$")))
       | sort_by(.number)
       | .[0].number // empty
     '
   )"
 
-  open_title="$(
-    echo "$repo_projects" | jq -r --argjson N "${open_proj:-0}" '
-      map(select(.number == $N))
-      | .[0].title // empty
-    ' 2>/dev/null || true
-  )"
-
-  # ----------------------------
-  # Find last dev line title (max vX.Y.x), even if closed
-  # ----------------------------
-  local last_title
-  last_title="$(
-    echo "$repo_projects" | jq -r '
-      map(.title)
-      | sort_by(
-          sub("^v";"")
-          | sub("\\.x$";"")
-          | split(".")
-          | map(tonumber)
-        )
-      | last // empty
-    '
-  )"
-
-  # ----------------------------
-  # Decide target project
-  # ----------------------------
-  local target_proj="" target_title=""
   if [[ -n "${open_proj:-}" ]]; then
-    target_proj="$open_proj"
-    target_title="$open_title"
-    echo " Open dev line found: $target_title (#$target_proj)"
-  else
-    if [[ -n "${last_title:-}" ]]; then
-      # last_title is like vX.Y.x -> next is vX.(Y+1).x
-      local base major_i minor_i
-      base="${last_title#v}"
-      base="${base%.x}"
-      IFS='.' read -r major_i minor_i <<< "$base"
-      target_title="v${major_i}.$((minor_i + 1)).x"
+    open_title="$(
+      echo "$linked" | jq -r --argjson N "$open_proj" '
+        map(select(.number == $N)) | .[0].title // empty
+      '
+    )"
+    echo "Open dev line found: $open_title (#$open_proj)"
+    _rel_init__create_items "$repo_full" "$owner" "$open_proj" "$open_title" "$@"
+    return 0
+  fi
+
+  # ----------------------------
+  # 2) No open dev line → derive the next dev line from the repo's last semver tag
+  #    Source of truth: git tags, not project names.
+  # ----------------------------
+  local last_tag
+  last_tag="$(
+    gh api "repos/$repo_full/tags" --paginate -q '.[].name' \
+      | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+      | sort -V \
+      | tail -n 1 || true
+  )"
+  [[ -z "${last_tag:-}" ]] && last_tag="v0.0.0"
+
+  local base major minor patch
+  base="${last_tag#v}"
+  IFS='.' read -r major minor patch <<< "$base"
+
+  # Candidate dev line title (same MAJOR.MINOR as last tag)
+  local target_title="v${major}.${minor}.x"
+
+  # If a project with that exact title already exists (closed or not), bump MINOR until free
+  while echo "$linked" | jq -e --arg T "$target_title" 'any(.[]; (.title // "") == $T)' >/dev/null; do
+    minor=$((minor + 1))
+    target_title="v${major}.${minor}.x"
+  done
+
+  echo "Creating dev line project: $target_title"
+
+  local target_proj
+  target_proj="$(
+    gh project create --owner "$owner" --title "$target_title" --format json \
+      | jq -r '.number'
+  )"
+
+  gh project link "$target_proj" --owner "$owner" --repo "$repo_full" >/dev/null
+  echo "Project linked to repo: $repo_full"
+  echo "Project created: $target_title (#$target_proj)"
+
+  _rel_init__create_items "$repo_full" "$owner" "$target_proj" "$target_title" "$@"
+}
+
+# Helper used by rel_init: create issues and add them to the project
+_rel_init__create_items() {
+  emulate -L zsh
+  set -euo pipefail
+
+  local repo_full="$1"
+  local owner="$2"
+  local proj_no="$3"
+  local proj_title="$4"
+  shift 4 || true
+
+  if [[ "$#" -lt 1 ]]; then
+    echo "(no items) you can create them later."
+    return 0
+  fi
+
+  echo "Creating items:"
+
+  # Compute planned release from dev line title:
+  # vX.Y.x -> planned release vX.(Y+1)
+  local planned_release="$proj_title"
+  if [[ "$proj_title" =~ ^v([0-9]+)\.([0-9]+)\.x$ ]]; then
+    local maj="${match[1]}"
+    local min="${match[2]}"
+    planned_release="v${maj}.$((min + 1))"
+  fi
+
+  local sep="--"
+  local parts=() buf=""
+  local tok
+  for tok in "$@"; do
+    if [[ "$tok" == "$sep" ]]; then
+      parts+=("$buf")
+      buf=""
     else
-      target_title="v0.0.x"
+      buf="${buf:+$buf }$tok"
     fi
+  done
+  parts+=("$buf")
 
-    echo "Creating dev line project: $target_title"
+  local part t issue_url
+  for part in "${parts[@]}"; do
+    t="$(echo "$part" | xargs)"
+    [[ -z "$t" ]] && continue
 
-    target_proj="$(
-      gh project create --owner "$owner" --title "$target_title" --format json |
-        jq -r '.number'
+    issue_url="$(
+      gh issue create \
+        --repo "$repo_full" \
+        --title "$t" \
+        --body "Planned for release ${planned_release}." \
+        --assignee @me
     )"
 
-    gh project link "$target_proj" --owner "$owner" --repo "$repo_full" >/dev/null
-    echo "Project linked to repo: $repo_full"
-    echo "Project created: $target_title (#$target_proj)"
-  fi
+    if [[ -z "${issue_url:-}" || "${issue_url:-}" != https://github.com/*/issues/* ]]; then
+      echo "  failed to create issue: $t"
+      echo "     output: ${issue_url:-<empty>}"
+      continue
+    fi
 
-  # ----------------------------
-  # Create items (separator: --, no quoting)
-  # Usage: rel init Item 01 -- Item 02 -- Item 03
-  # rel_init receives tokens AFTER "init"
-  # ----------------------------
-  if [[ "$#" -ge 1 ]]; then
-    echo "Creating items:"
-
-    local sep="--"
-    local parts=()
-    local buf=""
-
-    local tok
-    for tok in "$@"; do
-      if [[ "$tok" == "$sep" ]]; then
-        parts+=("$buf")
-        buf=""
-      else
-        buf="${buf:+$buf }$tok"
-      fi
-    done
-    parts+=("$buf")
-
-    local part t issue_url
-    for part in "${parts[@]}"; do
-      t="$(echo "$part" | xargs)"
-      [[ -z "$t" ]] && continue
-
-      # compute planned release milestone from target_title (vX.Y.x -> vX.(Y+1))
-      local planned_release=""
-      if [[ "${target_title:-}" =~ '^v([0-9]+)\.([0-9]+)\.x$' ]]; then
-        local maj="${match[1]}"
-        local min="${match[2]}"
-        planned_release="v${maj}.$((min + 1))"
-      else
-        planned_release="$target_title"
-      fi
-
-      issue_url="$(
-        gh issue create \
-          --repo "$repo_full" \
-          --title "$t" \
-          --body "Planned for release ${planned_release}" \
-          --assignee @me
-      )"
-
-      if [[ -z "${issue_url:-}" || "${issue_url:-}" != https://github.com/*/issues/* ]]; then
-        echo "  failed to create issue: $t"
-        echo "     output: ${issue_url:-<empty>}"
-        continue
-      fi
-
-      gh project item-add "$target_proj" --owner "$owner" --url "$issue_url" >/dev/null
-      echo "  • created: $t"
-    done
-  else
-    echo "(no items) you can create them later."
-  fi
+    gh project item-add "$proj_no" --owner "$owner" --url "$issue_url" >/dev/null
+    echo "  • created: $t"
+  done
 }
