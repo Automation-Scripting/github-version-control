@@ -165,11 +165,21 @@ rel_init() {
       t="$(echo "$part" | xargs)"
       [[ -z "$t" ]] && continue
 
+      # compute planned release milestone from target_title (vX.Y.x -> vX.(Y+1))
+      local planned_release=""
+      if [[ "${target_title:-}" =~ '^v([0-9]+)\.([0-9]+)\.x$' ]]; then
+        local maj="${match[1]}"
+        local min="${match[2]}"
+        planned_release="v${maj}.$((min + 1))"
+      else
+        planned_release="$target_title"
+      fi
+
       issue_url="$(
         gh issue create \
           --repo "$repo_full" \
           --title "$t" \
-          --body "Planned for $target_title" \
+          --body "Planned for release ${planned_release}" \
           --assignee @me
       )"
 

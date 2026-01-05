@@ -17,15 +17,23 @@ rel_patch() {
   local notes="See item #${issue_no} of project v${REL_MAJOR}.${next_minor} for details."
   rel_create_release "$tag" "$notes"
 
-  # Mark the project item as Done (best-effort)
+  # Locate the corresponding project item (by issue number)
+  # and mark it as Done after the patch release.
   local json item_id
   json="$(rel_items_json)"
   item_id="$(echo "$json" | jq -r --argjson N "$issue_no" '
     .items[] | select(.content.number? == $N) | .id
   ' | head -n1)"
 
-  if [[ -n "${item_id:-}" && "$item_id" != "null" ]]; then
-    rel_try_set_status "$REL_PROJ" "$item_id" "Done"
+  if [[ -z "${item_id:-}" || "$item_id" == "null" ]]; then
+    echo "[warn] Project item not found for issue #$issue_no (nothing to mark Done)."
+  else
+    echo "[info] Marking project item as Done (issue #$issue_no, item_id=$item_id)..."
+    if rel_try_set_status "$REL_PROJ" "$item_id" "Done"; then
+      echo "[ok] Marked Done."
+    else
+      echo "[warn] Could not mark Done (best-effort)."
+    fi
   fi
 
   rel_issue_comment "$issue_no" "Released in $tag"
