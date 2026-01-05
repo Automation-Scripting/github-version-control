@@ -206,5 +206,50 @@ rel_create_tag() {
     -f "sha=$sha" \
     >/dev/null
 
-  echo "[info] Tag created: $tag (at $default_branch@$sha)"
+  echo "[info] Tag created: $tag (at $default_branch)"
+}
+
+rel_issue_last_patch_tag() {
+  emulate -L zsh
+  set -euo pipefail
+
+  local issue_no="$1"
+
+  # Grab the last comment that matches: "Tagged in vX.Y.Z"
+  gh issue view "$issue_no" --repo "$REL_REPO_FULL" --json comments \
+    | jq -r '
+      [.comments[].body
+        | select(test("^Tagged in v[0-9]+\\.[0-9]+\\.[0-9]+"))
+      ] | last // empty
+    ' \
+    | sed -E 's/^Tagged in (v[0-9]+\.[0-9]+\.[0-9]+).*/\1/'
+}
+
+rel_build_release_notes_from_project() {
+  emulate -L zsh
+  set -euo pipefail
+
+  local release_line="$1"  # e.g. "v0.1"
+  local json
+  json="$(rel_items_json)"
+
+  # Build a Markdown list of items with their latest patch tag (if any)
+  echo "See project ${release_line} for details."
+  echo
+  echo "## Shipped items"
+  echo
+
+  echo "$json" | jq -r '
+    .items[]
+    | select(.content.number? != null)
+    | "\(.content.number)\t\(.content.title // .title // "Untitled")"
+  ' | while IFS=$'\t' read -r issue_no title; do
+    local tag
+    tag="$(rel_issue_last_patch_tag "$issue_no" || true)"
+    if [[ -n "${tag:-}" ]]; then
+      echo "- #${issue_no} ${title} — **${tag}**"
+    else
+      echo "- #${issue_no} ${title}"
+    fi
+  done
 }

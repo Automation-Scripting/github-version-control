@@ -51,7 +51,7 @@ rel_minor() {
   local next_minor="$((REL_MINOR + 1))"
   local tag_release="v${REL_MAJOR}.${next_minor}.0"
   local proj_released="v${REL_MAJOR}.${next_minor} (released)"
-  local notes="See project v${REL_MAJOR}.${next_minor} for details."
+  local notes="$(rel_build_release_notes_from_project "v${REL_MAJOR}.${next_minor}")"
 
   # (new) Rename the current project to match the released version
   # (uses the project number loaded in the context)
