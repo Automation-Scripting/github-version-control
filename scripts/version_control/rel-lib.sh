@@ -6,6 +6,21 @@ rel_ctx_load_repo() {
   REL_OWNER="$(gh repo view --json owner -q .owner.login)"
   REL_REPO="$(gh repo view --json name -q .name)"
   REL_REPO_FULL="${REL_OWNER}/${REL_REPO}"
+
+  # true/false
+  REL_REPO_PRIVATE="$(gh repo view --json isPrivate -q .isPrivate)"
+}
+
+rel_project_visibility_for_repo() {
+  emulate -L zsh
+  set -euo pipefail
+
+  # GitHub Projects v2 usa PUBLIC|PRIVATE (caps)
+  if [[ "${REL_REPO_PRIVATE:-false}" == "true" ]]; then
+    echo "PRIVATE"
+  else
+    echo "PUBLIC"
+  fi
 }
 
 rel_ctx_load_open_milestone() {
@@ -173,12 +188,42 @@ rel_maybe_open_next_project() {
         gh project create --owner "$REL_OWNER" --title "$next_title" --format json |
           jq -r '.number'
       )"
-      echo "New Project opened: $next_title (#$next_proj)"
+     
+      rel_link_project_to_repo "$next_proj"
+
+      # Ajusta a visibilidade do Project conforme o repo atual
+      local vis
+      vis="$(rel_project_visibility_for_repo)"
+      gh project edit "$next_proj" --owner "$REL_OWNER" --visibility "$vis" >/dev/null
+
+      echo "New Project opened: $next_title (#$next_proj) visibility=$vis"
       ;;
     *)
       echo "Ok. No new Project created."
       ;;
   esac
+}
+
+rel_link_project_to_repo() {
+  emulate -L zsh
+  set -euo pipefail
+
+  local project_number="$1"
+
+  local project_id repo_id
+  project_id="$(gh project view "$project_number" --owner "$REL_OWNER" --format json | jq -r '.id')"
+  repo_id="$(gh api graphql -f query='
+    query($owner:String!, $name:String!){
+      repository(owner:$owner, name:$name){ id }
+    }' -F owner="$REL_OWNER" -F name="$REL_REPO" -q '.data.repository.id')"
+
+  # Link repository to project (Projects v2)
+  gh api graphql -f query='
+    mutation($projectId:ID!, $repoId:ID!){
+      linkProjectV2ToRepository(input:{projectId:$projectId, repositoryId:$repoId}) {
+        projectV2 { id }
+      }
+    }' -F projectId="$project_id" -F repoId="$repo_id" >/dev/null
 }
 
 rel_create_tag() {

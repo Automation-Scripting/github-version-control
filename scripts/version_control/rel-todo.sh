@@ -71,23 +71,49 @@ todo() {
   echo "   Patch: rel p #<issue>   | Minor: rel m   | Major: rel M"
   echo
 
+  local use_color=0
+  [[ -t 1 ]] && use_color=1
+
   gh project item-list "$proj" --owner "$owner" --format json |
-    jq -r '
+    jq -r --argjson COLOR "$use_color" '
       def ititle($i): ($i.title // $i.content.title // "Untitled");
+
       def inum($i):
         if ($i.content.number? != null) then
           ("#" + ($i.content.number|tostring))
         else
           "#?"
         end;
+
+      def inum_sort($i):
+        if ($i.content.number? != null) then ($i.content.number|tonumber) else 999999 end;
+
       def istatus($i): ($i.status // "No status");
+      def s($i): (istatus($i) | ascii_downcase);
+
+      # ordem desejada
+      def status_rank($i):
+        if   s($i) == "done"        then 0
+        elif s($i) == "ready"       then 1
+        elif s($i) == "in progress" then 2
+        elif s($i) == "todo"        then 3
+        else 9 end;
+
+      # pinta [Todo] de verde (ANSI) e reseta
+      def status_fmt($i):
+        if $COLOR == 1 and s($i) == "todo" then
+          "\u001b[32m" + istatus($i) + "\u001b[0m"
+        else
+          istatus($i)
+        end;
 
       .items
       | if (length==0) then
           "   (no items)"
         else
-          .[]
-          | ("- [" + istatus(.) + "] " + inum(.) + "  " + ititle(.))
+          sort_by([ status_rank(.), inum_sort(.) ])
+          | .[]
+          | ("- [" + status_fmt(.) + "] " + inum(.) + "  " + ititle(.))
         end
     '
 }
