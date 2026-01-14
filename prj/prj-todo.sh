@@ -99,10 +99,18 @@ todo() {
         elif s($i) == "todo"        then 3
         else 9 end;
 
-      # pinta [Todo] de verde (ANSI) e reseta
+      # cores por status (ANSI)
       def status_fmt($i):
-        if $COLOR == 1 and s($i) == "todo" then
-          "\u001b[32m" + istatus($i) + "\u001b[0m"
+        if $COLOR != 1 then
+          istatus($i)
+        elif s($i) == "done" then
+          "\u001b[31m" + istatus($i) + "\u001b[0m"   # vermelho
+        elif s($i) == "ready" then
+          "\u001b[32m" + istatus($i) + "\u001b[0m"   # verde
+        elif s($i) == "in progress" then
+          "\u001b[33m" + istatus($i) + "\u001b[0m"   # amarelo
+        elif s($i) == "todo" then
+          "\u001b[34m" + istatus($i) + "\u001b[0m"   # azul
         else
           istatus($i)
         end;

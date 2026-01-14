@@ -189,6 +189,10 @@ _rel_init__create_items() {
     fi
 
     gh project item-add "$proj_no" --owner "$owner" --url "$issue_url" >/dev/null
+
+    issue_no="${issue_url##*/}"
+    rel_set_item_status "#$issue_no" "Todo"
+    
     echo "  • created: $t"
   done
 }
