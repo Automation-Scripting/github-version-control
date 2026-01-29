@@ -11,12 +11,14 @@ rel() {
     progress) rel_progress "$@" ;;
     done)     rel_done     "$@" ;;
     init)     rel_init     "$@" ;;
+    fix)      rel_fix      "$@" ;;
     p)        rel_patch    "$@" ;;
     m)        rel_minor    "$@" ;;
     M)        rel_major    "$@" ;;
     *)
       echo "Usage:"
       echo "  rel init Item A -- Item B -- Item C"
+      echo "  rel fix Item A -- Item B -- Item C"
       echo "  rel p <issue>        (patch release)"
       echo "  rel m                (minor release)"
       echo "  rel M                (major release)"

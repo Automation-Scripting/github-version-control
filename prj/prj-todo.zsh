@@ -7,9 +7,11 @@ todo() {
   owner="$(gh repo view --json owner -q .owner.login)"
   repo="$(gh repo view --json name -q .name)"
   repo_full="$owner/$repo"
-
   owner_type="$(gh api "repos/$repo_full" -q '.owner.type')"  # User | Organization
 
+  # ----------------------------
+  # Find open dev line project vX.Y.x linked to this repo
+  # ----------------------------
   local projects_json
   if [[ "$owner_type" == "Organization" ]]; then
     projects_json="$(
@@ -47,7 +49,6 @@ todo() {
     )"
   fi
 
-  # only open dev lines vX.Y.x linked to this repo
   local proj title
   proj="$(
     echo "$projects_json" | jq -r --arg REPO "$repo_full" '
@@ -75,9 +76,90 @@ todo() {
   local use_color=0
   [[ -t 1 ]] && use_color=1
 
-  gh project item-list "$proj" --owner "$owner" --format json |
+  # ----------------------------
+  # Resolve project node ID + fetch items WITH labels
+  # ----------------------------
+  local data_json
+  if [[ "$owner_type" == "Organization" ]]; then
+    data_json="$(
+      gh api graphql -f query='
+        query($login:String!, $number:Int!) {
+          organization(login:$login) {
+            projectV2(number:$number) {
+              title
+              items(first: 100) {
+                nodes {
+                  id
+                  fieldValues(first: 50) {
+                    nodes {
+                      ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
+                      ... on ProjectV2ItemFieldTextValue        { text field { ... on ProjectV2FieldCommon { name } } }
+                    }
+                  }
+                  content {
+                    __typename
+                    ... on Issue {
+                      number
+                      title
+                      labels(first: 50) { nodes { name } }
+                    }
+                    ... on PullRequest {
+                      number
+                      title
+                      labels(first: 50) { nodes { name } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }' -F login="$owner" -F number="$proj" \
+      | jq -c '.data.organization.projectV2'
+    )"
+  else
+    data_json="$(
+      gh api graphql -f query='
+        query($login:String!, $number:Int!) {
+          user(login:$login) {
+            projectV2(number:$number) {
+              title
+              items(first: 100) {
+                nodes {
+                  id
+                  fieldValues(first: 50) {
+                    nodes {
+                      ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
+                      ... on ProjectV2ItemFieldTextValue        { text field { ... on ProjectV2FieldCommon { name } } }
+                    }
+                  }
+                  content {
+                    __typename
+                    ... on Issue {
+                      number
+                      title
+                      labels(first: 50) { nodes { name } }
+                    }
+                    ... on PullRequest {
+                      number
+                      title
+                      labels(first: 50) { nodes { name } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }' -F login="$owner" -F number="$proj" \
+      | jq -c '.data.user.projectV2'
+    )"
+  fi
+
+  # ----------------------------
+  # Render
+  # ----------------------------
+  echo "$data_json" |
     jq -r --argjson COLOR "$use_color" '
-      def ititle($i): ($i.title // $i.content.title // "Untitled");
+      def ititle($i): ($i.content.title // "Untitled");
 
       def inum($i):
         if ($i.content.number? != null) then
@@ -89,32 +171,56 @@ todo() {
       def inum_sort($i):
         if ($i.content.number? != null) then ($i.content.number|tonumber) else 999999 end;
 
-      def istatus($i): ($i.status // "No status");
+      # Status is a Project field value named "Status"
+      def istatus($i):
+        (
+          $i.fieldValues.nodes[]
+          | select(.field.name? == "Status")
+          | .name
+        ) // "No status";
+
       def s($i): (istatus($i) | ascii_downcase);
 
-      # ordem desejada
+      def labels($i): ($i.content.labels.nodes // []);
+      def has_label($i; $name):
+        any(labels($i)[]; (.name // "" | ascii_downcase) == ($name|ascii_downcase));
+
+      # label-driven "fix" kind
+      def is_fix($i):
+        has_label($i; "bug") or has_label($i; "fix");
+
+      # ordem: FIX primeiro, depois FEAT; e dentro disso por status
+      def kind_rank($i):
+        if is_fix($i) then 0 else 1 end;
+
+      # status display: TODO vira FIX se label indicar
+      def status_display($i):
+        if s($i) == "todo" and is_fix($i) then "fix"
+        else s($i) end;
+
+      # ordem desejada: done, todo, fix (fix por último = mais urgente)
       def status_rank($i):
-        if   s($i) == "done"        then 0
-        elif s($i) == "ready"       then 1
-        elif s($i) == "in progress" then 2
-        elif s($i) == "todo"        then 3
+        if   status_display($i) == "done" then 0
+        elif status_display($i) == "todo" then 1
+        elif status_display($i) == "fix"  then 2
         else 9 end;
 
-      # cores por status (ANSI)
       def status_fmt($i):
         if $COLOR != 1 then
-          istatus($i)
+          status_display($i)
         elif s($i) == "done" then
-          "\u001b[35m" + istatus($i) + "\u001b[0m"     # roxo 
+          "\u001b[35m" + status_display($i) + "\u001b[0m"
         elif s($i) == "in progress" then
-          "\u001b[33m" + istatus($i) + "\u001b[0m"     # amarelo
+          "\u001b[33m" + status_display($i) + "\u001b[0m"
+        elif s($i) == "todo" and is_fix($i) then
+          "\u001b[31mFIX\u001b[0m "
         elif s($i) == "todo" then
-          "\u001b[32m" + "TODO" + "\u001b[0m"          # verde
+          "\u001b[32mTODO\u001b[0m"
         else
-          istatus($i)
+          status_display($i)
         end;
 
-      .items
+      .items.nodes
       | if (length==0) then
           "   (no items)"
         else
