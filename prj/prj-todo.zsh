@@ -157,16 +157,13 @@ todo() {
   # ----------------------------
   # Render
   # ----------------------------
- echo "$data_json" |
+  echo "$data_json" |
   jq -r --argjson COLOR "$use_color" '
+    # ---------- helpers ----------
     def ititle($i): ($i.content.title // "Untitled");
 
     def inum($i):
-      if ($i.content.number? != null) then
-        ("#" + ($i.content.number|tostring))
-      else
-        "#?"
-      end;
+      if ($i.content.number? != null) then ("#" + ($i.content.number|tostring)) else "#?" end;
 
     def inum_sort($i):
       if ($i.content.number? != null) then ($i.content.number|tonumber) else 999999 end;
@@ -189,53 +186,54 @@ todo() {
     def is_fix($i):
       has_label($i; "bug") or has_label($i; "fix");
 
-    # ordem: FIX primeiro, depois FEAT; e dentro disso por status
-    def kind_rank($i):
-      if is_fix($i) then 0 else 1 end;
-
-    # status display: TODO vira FIX se label indicar
+    # TODO vira FIX (só para display) se label indicar
     def status_display($i):
-      if s($i) == "todo" and is_fix($i) then "fix"
-      else s($i) end;
+      if s($i) == "todo" and is_fix($i) then "fix" else s($i) end;
 
-    # ordem desejada: done, todo, fix (fix por último = mais urgente)
+    # ordem desejada: done, todo, fix (fix por último)
     def status_rank($i):
       if   status_display($i) == "done" then 0
       elif status_display($i) == "todo" then 1
       elif status_display($i) == "fix"  then 2
       else 9 end;
 
+    # pad à direita (jq 1.6 não tem rpad)
+    def pad_right($s; $w):
+      ($s + (" " * ((($w - ($s|length)) | if . < 0 then 0 else . end))));
+
+    # status como texto fixo de largura 4 (TODO/FIX/DONE/...)
+    def status_pad4($i):
+      (status_display($i) | ascii_upcase | .[0:4] | pad_right(.; 4));
+
+    # status com cor, mas sem mexer na largura (a largura é do texto, não do ANSI)
     def status_fmt($i):
       if $COLOR != 1 then
-        status_display($i)
-      elif s($i) == "done" then
-        "\u001b[35m" + status_display($i) + "\u001b[0m"
-      elif s($i) == "in progress" then
-        "\u001b[33m" + status_display($i) + "\u001b[0m"
-      elif s($i) == "todo" and is_fix($i) then
-        "\u001b[31mFIX\u001b[0m "      # NOTE: FIX tem 1 espaço embutido pra ficar 4 chars
-      elif s($i) == "todo" then
-        "\u001b[32mTODO\u001b[0m"
+        status_pad4($i)
+      elif status_display($i) == "done" then
+        "\u001b[35m" + status_pad4($i) + "\u001b[0m"
+      elif status_display($i) == "in progress" then
+        "\u001b[33m" + status_pad4($i) + "\u001b[0m"
+      elif status_display($i) == "fix" then
+        "\u001b[31m" + status_pad4($i) + "\u001b[0m"
+      elif status_display($i) == "todo" then
+        "\u001b[32m" + status_pad4($i) + "\u001b[0m"
       else
-        status_display($i)
+        status_pad4($i)
       end;
 
-    # ----------------------------
-    # NEW: padding helpers p/ alinhar a coluna do "#"
-    # ----------------------------
-    def rpad($str; $w):
-      $str + (" " * (( $w - ($str|length) ) | if . < 0 then 0 else . end));
-
+    # ---------- main ----------
     .items.nodes as $items
-    | if ($items|length)==0 then
+    | if ($items|length) == 0 then
         "   (no items)"
       else
-        # largura máxima do "#N" (ex: #1 vs #10 vs #100)
         ($items | map(inum(.)|length) | max) as $NW
         | $items
         | sort_by([ status_rank(.), inum_sort(.) ])
         | .[]
-        | ("- [" + status_fmt(.) + "] " + rpad(inum(.); $NW) + "  " + ititle(.))
+        | ("- [" + status_fmt(.) + "] "
+          + pad_right(inum(.); $NW)
+          + "  "
+          + ititle(.))
       end
   '
 }
