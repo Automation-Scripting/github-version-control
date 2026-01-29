@@ -201,25 +201,38 @@ todo() {
     def pad_right($s; $w):
       ($s + (" " * ((($w - ($s|length)) | if . < 0 then 0 else . end))));
 
-    # status como texto fixo de largura 4 (TODO/FIX/DONE/...)
-    def status_pad4($i):
-      (status_display($i) | ascii_upcase | .[0:4] | pad_right(.; 4));
+    # ---- NEW: coluna do número com largura fixa ----
+    def inum_col($i; $w):
+      pad_right(inum($i); $w);
 
-    # status com cor, mas sem mexer na largura (a largura é do texto, não do ANSI)
-    def status_fmt($i):
+    # bloco sem cor (NUNCA muda)
+    def status_block($i):
+      "[" + (status_display($i) | ascii_upcase) + "]";
+
+    # bloco sem cor (lowercase, só pro DONE roxo)
+    def status_block_l($i):
+      "[" + status_display($i) + "]";
+
+    # bloco COM cor (mesmos chars do bloco)
+    def status_block_colored($i):
       if $COLOR != 1 then
-        status_pad4($i)
+        status_block($i)
       elif status_display($i) == "done" then
-        "\u001b[35m" + status_pad4($i) + "\u001b[0m"
+        "\u001b[35m" + status_block_l($i) + "\u001b[0m"
       elif status_display($i) == "in progress" then
-        "\u001b[33m" + status_pad4($i) + "\u001b[0m"
+        "\u001b[33m" + status_block($i) + "\u001b[0m"
       elif status_display($i) == "fix" then
-        "\u001b[31m" + status_pad4($i) + "\u001b[0m"
+        "\u001b[31m" + status_block($i) + "\u001b[0m"
       elif status_display($i) == "todo" then
-        "\u001b[32m" + status_pad4($i) + "\u001b[0m"
+        "\u001b[32m" + status_block($i) + "\u001b[0m"
       else
-        status_pad4($i)
+        status_block($i)
       end;
+
+    # coluna status com largura fixa (padding calculado no bloco SEM ANSI)
+    def status_col($i):
+      (status_block($i) | pad_right(.; 6)) as $plain
+      | (status_block_colored($i) + ($plain[ (status_block($i)|length) : ]));
 
     # ---------- main ----------
     .items.nodes as $items
@@ -230,8 +243,10 @@ todo() {
         | $items
         | sort_by([ status_rank(.), inum_sort(.) ])
         | .[]
-        | ("- [" + status_fmt(.) + "] "
-          + pad_right(inum(.); $NW)
+        | ("- "
+          + status_col(.)
+          + " "
+          + inum_col(.; $NW)
           + "  "
           + ititle(.))
       end
